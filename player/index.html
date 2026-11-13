@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#1976d2">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Listen">
+<title>Listen</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<section id="library" hidden>
+  <header class="bar">
+    <h1>Listen</h1>
+    <label class="chip primary" for="import" id="import-btn">＋ Add</label>
+    <input type="file" id="import" multiple accept=".json,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,audio/*,application/json" hidden>
+  </header>
+  <div id="import-msg" class="msg" hidden></div>
+  <ul id="episodes"></ul>
+  <div id="empty" class="empty" hidden>
+    <p>Your library is empty.</p>
+    <p>Tap “＋ Add” and pick both files of an episode in Files:
+      <b>X.mp3</b> and <b>X.json</b> (made by <code>listen-gen</code>). You can add several episodes at once.</p>
+    <p>Everything is stored on the phone and works without internet.</p>
+  </div>
+  <p id="storage" class="storage"></p>
+</section>
+
+<section id="player" hidden>
+  <header class="bar">
+    <button class="icon" id="back" aria-label="Back">‹</button>
+    <h1 id="ep-title"></h1>
+    <button class="chip" id="tr-toggle">Translation</button>
+    <button class="chip" id="speed">1×</button>
+  </header>
+  <div id="player-msg" class="msg error" hidden></div>
+  <main id="cues"></main>
+  <footer>
+    <div class="row seekrow">
+      <span class="time" id="cur">0:00</span>
+      <input type="range" id="seek" min="0" max="1" step="0.1" value="0" aria-label="Position">
+      <span class="time" id="dur">0:00</span>
+    </div>
+    <div class="row">
+      <button class="btn" data-skip="-60" aria-label="Back 1 minute">−1m</button>
+      <button class="btn" data-skip="-10" aria-label="Back 10 seconds">−10</button>
+      <button class="btn" data-skip="-5" aria-label="Back 5 seconds">−5</button>
+      <button class="btn" id="play" aria-label="Play">▶</button>
+      <button class="btn" data-skip="5" aria-label="Forward 5 seconds">+5</button>
+      <button class="btn" data-skip="10" aria-label="Forward 10 seconds">+10</button>
+      <button class="btn" data-skip="60" aria-label="Forward 1 minute">+1m</button>
+    </div>
+  </footer>
+
+  <div id="sheet-bg"></div>
+  <div id="sheet" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="word" id="s-word"></div>
+    <div class="label">Sentence</div>
+    <div class="orig" id="s-orig"></div>
+    <div class="label">Translation</div>
+    <div class="trans" id="s-trans"></div>
+    <div class="actions">
+      <button class="btn wide" id="s-replay">↺ Replay sentence</button>
+      <button class="btn wide" id="s-close">Close</button>
+    </div>
+  </div>
+</section>
+
+<audio id="audio" preload="auto"></audio>
+<script type="module" src="app.js"></script>
+</body>
+</html>
