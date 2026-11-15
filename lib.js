@@ -43,24 +43,48 @@ export function validateEpisode(data) {
   return data;
 }
 
-// Groups picked files into episodes. `files` items need {name}; JSON content
-// is read by the caller. Returns {pairs: [{json, audio}], errors: [string]}.
-export function pairFiles(files, jsonAudioName) {
+// Groups picked files into episodes. `files` items need {name}, and
+// {webkitRelativePath} when a folder was picked (pairs only within one folder).
+// JSON content is read by the caller; jsonAudioName(json) is its "audio" field.
+// A leftover audio next to a paired episode with the same name (X.mp3 when
+// X.json points to the generator's X.m4a) is skipped silently. In a folder,
+// files that are neither audio nor JSON (subtitles etc.) are skipped silently too.
+// Returns {pairs: [{json, audio}], errors: [string], orphans: [audio without JSON]}.
+export function pairFiles(files, jsonAudioName, { folder = false } = {}) {
+  const dir = (f) => { const p = f.webkitRelativePath || ''; return p.slice(0, p.lastIndexOf('/') + 1); };
+  const key = (f, name = f.name) => dir(f) + stem(name);
   const jsons = files.filter((f) => ext(f.name) === 'json');
   const audios = files.filter((f) => AUDIO_EXT.includes(ext(f.name)));
-  const pairs = [], errors = [], used = new Set();
+  const pairs = [], errors = [], orphans = [], used = new Set(), done = new Set();
   for (const j of jsons) {
     const wanted = jsonAudioName(j);
-    const audio = audios.find((a) => a.name === wanted)
-      || audios.find((a) => !used.has(a) && stem(a.name) === stem(j.name));
-    if (audio) { pairs.push({ json: j, audio }); used.add(audio); }
-    else errors.push(`${j.name}: audio file not selected: ${wanted || stem(j.name) + '.mp3'}`);
+    const near = audios.filter((a) => !used.has(a) && dir(a) === dir(j));
+    const audio = near.find((a) => a.name === wanted)
+      || near.find((a) => stem(a.name) === stem(j.name) && (!wanted || ext(a.name) === ext(wanted)));
+    if (audio) {
+      pairs.push({ json: j, audio });
+      used.add(audio);
+      done.add(key(j)).add(key(audio));
+      continue;
+    }
+    const other = near.find((a) => stem(a.name) === stem(j.name));
+    if (other) {
+      used.add(other);
+      errors.push(`${j.name}: needs ${wanted}, not ${other.name}`);
+    } else errors.push(`${j.name}: audio file not selected: ${wanted || stem(j.name) + '.mp3'}`);
+    done.add(key(j));
   }
-  for (const a of audios) if (!used.has(a)) errors.push(`${a.name}: missing ${stem(a.name)}.json`);
-  for (const f of files) {
-    if (!jsons.includes(f) && !audios.includes(f)) errors.push(`${f.name}: not audio or .json — skipped`);
+  for (const a of audios) {
+    if (used.has(a) || done.has(key(a))) continue;
+    orphans.push(a);
+    errors.push(`${a.name}: missing ${stem(a.name)}.json`);
   }
-  return { pairs, errors };
+  if (!folder) {
+    for (const f of files) {
+      if (!jsons.includes(f) && !audios.includes(f)) errors.push(`${f.name}: not audio or .json — skipped`);
+    }
+  }
+  return { pairs, errors, orphans };
 }
 
 // Index of the last cue whose start <= t (-1 before the first cue).
@@ -106,6 +130,22 @@ export function sentencesEndingAt(cues, sentences) {
 
 export function episodeId(data) {
   return stem(data.audio);
+}
+
+// Playlist order: by title, numbers compared as numbers (Episode 2 < Episode 10).
+export function sortEpisodes(eps) {
+  return [...eps].sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+}
+
+// The id d steps away from id in the ordered list of ids, or null.
+export function neighbor(ids, id, d) {
+  const i = ids.indexOf(id);
+  return i < 0 ? null : ids[i + d] ?? null;
+}
+
+// Played to the end (the player then starts it over).
+export function isFinished(pos, dur) {
+  return dur > 0 && pos >= dur - 2;
 }
 
 export function duration(data) {

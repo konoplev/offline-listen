@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   stem, ext, fmtTime, words, validateEpisode, pairFiles, cueAt, buildWordToSentence,
   wordIndexInSentence, sentencesEndingAt, episodeId, duration, nextRate, RATES, clamp,
+  sortEpisodes, neighbor, isFinished,
 } from '../lib.js';
 
 const cues = [
@@ -63,6 +64,57 @@ test('pairFiles pairs by the audio name in json, then by stem', () => {
     'D.mp3: missing D.json',
     'notes.txt: not audio or .json — skipped',
   ]);
+});
+
+test('pairFiles: orphans are audio files without a JSON', () => {
+  const f = (name) => ({ name });
+  const { orphans } = pairFiles([f('A.json'), f('A.mp3'), f('D.mp3')], () => 'A.mp3');
+  assert.deepEqual(orphans.map((a) => a.name), ['D.mp3']);
+});
+
+test('pairFiles: folder from the generator (X.mp3 + X.m4a + X.json + srt)', () => {
+  const f = (name, dir = 'pods/') => ({ name, webkitRelativePath: dir + name });
+  const files = [f('X.mp3'), f('X.m4a'), f('X.json'), f('X.srt'), f('X.ru.srt'), f('Y.mp3'), f('Y.json'), f('Z.mp3'),
+    f('.DS_Store')];
+  const audioOf = { 'X.json': 'X.m4a', 'Y.json': 'Y.mp3' };
+  const { pairs, errors, orphans } = pairFiles(files, (j) => audioOf[j.name], { folder: true });
+  assert.deepEqual(pairs.map((p) => [p.json.name, p.audio.name]), [['X.json', 'X.m4a'], ['Y.json', 'Y.mp3']]);
+  assert.deepEqual(errors, ['Z.mp3: missing Z.json']);  // the source X.mp3 and subtitles are skipped silently
+  assert.deepEqual(orphans.map((a) => a.name), ['Z.mp3']);
+});
+
+test('pairFiles: in a folder, files pair only within their subfolder', () => {
+  const f = (path) => ({ name: path.split('/').pop(), webkitRelativePath: path });
+  const files = [f('r/a/E.json'), f('r/b/E.mp3'), f('r/b/E.json'), f('r/a/E.mp3')];
+  const { pairs, errors } = pairFiles(files, () => 'E.mp3', { folder: true });
+  assert.deepEqual(pairs.map((p) => [p.json.webkitRelativePath, p.audio.webkitRelativePath]),
+    [['r/a/E.json', 'r/a/E.mp3'], ['r/b/E.json', 'r/b/E.mp3']]);
+  assert.deepEqual(errors, []);
+});
+
+test('pairFiles: JSON made for X.m4a does not take the VBR X.mp3', () => {
+  const f = (name) => ({ name });
+  const { pairs, errors, orphans } = pairFiles([f('X.json'), f('X.mp3')], () => 'X.m4a');
+  assert.deepEqual(pairs, []);
+  assert.deepEqual(errors, ['X.json: needs X.m4a, not X.mp3']);
+  assert.deepEqual(orphans, []);
+});
+
+test('sortEpisodes: numbers in titles compare as numbers', () => {
+  const eps = ['Episode 10', 'Episode 2', 'Bonus', 'Episode 1'].map((title) => ({ title }));
+  assert.deepEqual(sortEpisodes(eps).map((e) => e.title), ['Bonus', 'Episode 1', 'Episode 2', 'Episode 10']);
+  assert.equal(eps[0].title, 'Episode 10');  // not sorted in place
+});
+
+test('neighbor / isFinished', () => {
+  assert.equal(neighbor(['a', 'b', 'c'], 'b', 1), 'c');
+  assert.equal(neighbor(['a', 'b', 'c'], 'b', -1), 'a');
+  assert.equal(neighbor(['a', 'b', 'c'], 'c', 1), null);
+  assert.equal(neighbor(['a', 'b', 'c'], 'a', -1), null);
+  assert.equal(neighbor(['a'], 'x', 1), null);
+  assert.equal(isFinished(98.5, 100), true);
+  assert.equal(isFinished(90, 100), false);
+  assert.equal(isFinished(0, 0), false);
 });
 
 test('cueAt: last cue starting at or before t', () => {

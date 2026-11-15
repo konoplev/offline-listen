@@ -1,7 +1,7 @@
 // Offline support: the app shell is cached on install. Requests are served
 // from the cache first and refreshed from the network in the background, so a
 // new version is picked up on the next launch. Bump VERSION when files change.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `offline-listen-${VERSION}`;
 const SHELL = ['./', 'index.html', 'app.js', 'lib.js', 'db.js', 'app.css', 'manifest.webmanifest',
   'icon-180.png', 'icon-512.png'];

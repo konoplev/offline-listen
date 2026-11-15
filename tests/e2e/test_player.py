@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from conftest import EP_JSON, EP_MP3, audio_time, import_files, is_paused, set_time
+from conftest import EP_JSON, EP_MP3, audio_time, import_files, import_folder, is_paused, make_episode, set_time
 
 
 def word_el(page, ci, wi):
@@ -313,8 +313,8 @@ def test_back_button_and_history(opened):
 
 def test_unknown_episode_url_falls_back_to_library(page, server):
     page.goto(server + "#/ep/nope")
-    page.wait_for_selector("#library:not([hidden])")
-    assert not page.url.endswith("nope")
+    page.wait_for_function("!location.hash.includes('nope')")  # after the failed lookup in IndexedDB
+    assert page.locator("#library").is_visible()
 
 
 def test_media_session_metadata(opened):
@@ -347,7 +347,7 @@ def test_no_horizontal_overflow(opened, width):
     page = opened
     page.set_viewport_size({"width": width, "height": 700})
     assert page.evaluate("document.documentElement.scrollWidth") <= width
-    for sel in ["#play", '[data-skip="-60"]', '[data-skip="60"]', "#speed", "#tr-toggle"]:
+    for sel in ["#play", '[data-skip="-60"]', '[data-skip="60"]', "#speed", "#tr-toggle", "#prev", "#next"]:
         box = page.locator(sel).bounding_box()
         assert box["x"] >= 0 and box["x"] + box["width"] <= width, sel
 
@@ -392,3 +392,132 @@ def test_finished_episode_starts_over(opened):
     page.wait_for_function("document.getElementById('audio').readyState >= 1")
     assert audio_time(page) == pytest.approx(0, abs=0.1)
     assert page.inner_text("#cur") == "0:00"
+
+
+# ------------------------------------------------------------------ add menu, folder import
+
+def test_add_menu_offers_folder_and_files(page):
+    assert not page.locator("#add-menu").is_visible()
+    page.click("#import-btn")
+    assert page.locator("#add-menu").is_visible()
+    assert "Folder" in page.inner_text("#add-menu") and "Files" in page.inner_text("#add-menu")
+    assert page.get_attribute("label[for=import-dir]", "for") == "import-dir"
+    assert page.evaluate("document.getElementById('import-dir').webkitdirectory")
+    page.click("h1")
+    assert not page.locator("#add-menu").is_visible()
+
+
+def test_import_folder_matches_json_by_name(page, tmp_path):
+    pods = tmp_path / "pods"
+    make_episode(pods, "Episode 10")
+    make_episode(pods, "Episode 2", ext="m4a")
+    (pods / "Episode 2.mp3").write_bytes(EP_MP3.read_bytes())  # VBR source next to the generator's m4a
+    (pods / "Episode 2.srt").write_text("1\n", encoding="utf-8")
+    (pods / "Extra.mp3").write_bytes(EP_MP3.read_bytes())
+    import_folder(page, pods)
+    page.wait_for_selector(".ep")
+    msg = page.inner_text("#import-msg")
+    assert msg.splitlines() == ["Episodes added: 2", "Extra.mp3: missing Extra.json"]
+    assert [t.strip() for t in page.locator(".ep-title").all_inner_texts()] == ["Episode 2", "Episode 10"]
+    assert page.inner_text("#orphans") == "Pick JSON for Extra.mp3"
+
+    import_folder(page, pods)  # again: nothing is copied twice
+    page.wait_for_function("document.getElementById('import-msg').textContent.includes('Already')")
+    assert page.inner_text("#import-msg").splitlines()[0] == "Already in the library: 2"
+    assert page.locator(".ep").count() == 2
+
+
+def test_import_folder_with_no_audio(page, tmp_path):
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    import_folder(page, tmp_path)
+    page.wait_for_selector("#import-msg.error:not([hidden])")
+    assert page.inner_text("#import-msg") == "No audio files in this folder"
+
+
+def test_pick_json_for_audio_without_one(page):
+    import_files(page, EP_MP3)
+    page.wait_for_selector("#orphans:not([hidden])")
+    assert page.locator(".ep").count() == 0
+    with page.expect_file_chooser() as fc:
+        page.click("text=Pick JSON for Episode 1.mp3")
+    fc.value.set_files(str(EP_JSON))
+    page.wait_for_selector(".ep")
+    assert page.inner_text("#import-msg") == "Episodes added: 1"
+    assert page.locator("#orphans").is_hidden()
+
+
+# ------------------------------------------------------------------ playlist
+
+@pytest.fixture
+def two(page, tmp_path):
+    """Episode 1 and Episode 2 in the library, Episode 1 open."""
+    make_episode(tmp_path, "Episode 1")
+    make_episode(tmp_path, "Episode 2")
+    import_folder(page, tmp_path)
+    page.wait_for_function("document.querySelectorAll('.ep').length === 2")
+    page.click(".ep-open >> text=Episode 1")
+    page.wait_for_selector("#player:not([hidden])")
+    page.wait_for_function("document.getElementById('audio').readyState >= 1")
+    page.wait_for_function("!document.getElementById('next').disabled")
+    return page
+
+
+def test_next_episode_starts_when_one_ends(two):
+    page = two
+    dur = page.evaluate("document.getElementById('audio').duration")
+    set_time(page, dur - 1)
+    page.click("#play")
+    page.wait_for_function("document.getElementById('ep-title').textContent === 'Episode 2'", timeout=10000)
+    assert "#/ep/Episode%202" in page.url
+    page.wait_for_function("document.getElementById('audio').currentTime > 0.5")
+    assert not is_paused(page)
+    assert page.locator(".cue").count() > 0
+    page.click("#back")
+    page.wait_for_selector(".ep.done")  # the list is re-rendered asynchronously
+    assert page.locator(".ep.done .ep-title").all_inner_texts() == ["Episode 1"]
+
+
+def test_last_episode_ends_and_stops(two):
+    page = two
+    page.click("#next")
+    page.wait_for_function("document.getElementById('ep-title').textContent === 'Episode 2'")
+    assert page.is_disabled("#next") and not page.is_disabled("#prev")
+    page.wait_for_function("document.getElementById('audio').readyState >= 1")
+    dur = page.evaluate("document.getElementById('audio').duration")
+    set_time(page, dur - 1)
+    page.click("#play")
+    page.wait_for_function("document.getElementById('audio').ended && document.getElementById('audio').paused")
+    page.wait_for_timeout(500)  # nothing else starts
+    assert page.inner_text("#ep-title") == "Episode 2"
+    assert is_paused(page)
+
+
+def test_prev_next_buttons_keep_play_state(two):
+    page = two
+    assert page.is_disabled("#prev")
+    page.click("#next")  # paused stays paused
+    page.wait_for_function("document.getElementById('ep-title').textContent === 'Episode 2'")
+    assert is_paused(page)
+    page.click("#play")
+    page.wait_for_function("!document.getElementById('audio').paused")
+    page.click("#prev")  # playing keeps playing
+    page.wait_for_function("document.getElementById('ep-title').textContent === 'Episode 1'")
+    page.wait_for_function("document.getElementById('audio').currentTime > 0.3")
+    assert not is_paused(page)
+    assert "#/ep/Episode%201" in page.url
+    page.click("#back")
+    page.wait_for_selector("#library:not([hidden])")
+
+
+def test_media_session_track_actions(two):
+    page = two
+    page.evaluate("""() => {
+        window.__h = {};
+        const orig = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+        navigator.mediaSession.setActionHandler = (k, fn) => { window.__h[k] = fn; orig(k, fn); };
+    }""")
+    page.click("#next")
+    page.wait_for_function("document.getElementById('ep-title').textContent === 'Episode 2'")
+    page.wait_for_function("window.__h.previoustrack")
+    page.evaluate("window.__h.previoustrack()")
+    page.wait_for_function("document.getElementById('ep-title').textContent === 'Episode 1'")

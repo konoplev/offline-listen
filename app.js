@@ -1,7 +1,7 @@
 import * as db from './db.js';
 import {
   validateEpisode, pairFiles, cueAt, buildWordToSentence, wordIndexInSentence, sentencesEndingAt,
-  episodeId, duration, fmtTime, words, nextRate, clamp,
+  episodeId, duration, fmtTime, words, nextRate, clamp, ext, sortEpisodes, neighbor, isFinished,
 } from './lib.js';
 
 const $ = (id) => document.getElementById(id);
@@ -33,11 +33,12 @@ async function showLibrary() {
   $('player').hidden = true;
   $('library').hidden = false;
   document.title = 'Listen';
-  const eps = (await db.listEpisodes()).sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+  const eps = sortEpisodes(await db.listEpisodes());
+  order = eps.map((ep) => ep.id);
   $('empty').hidden = eps.length > 0;
   $('episodes').innerHTML = eps.map((ep) => {
     const dur = duration(ep.data), pos = prefs.pos(ep.id), pct = dur ? Math.min(100, (pos / dur) * 100) : 0;
-    return `<li class="ep" data-id="${esc(ep.id)}">
+    return `<li class="ep${isFinished(pos, dur) ? ' done' : ''}" data-id="${esc(ep.id)}">
       <button class="ep-open">
         <div class="ep-title">${esc(ep.title)}</div>
         <div class="ep-meta">${fmtTime(pos)} / ${fmtTime(dur)} · ${ep.data.cues.length} lines</div>
@@ -77,48 +78,118 @@ $('episodes').addEventListener('click', async (e) => {
   if (e.target.closest('.ep-open')) location.hash = `#/ep/${encodeURIComponent(id)}`;
 });
 
-$('import').addEventListener('change', async (e) => {
-  const files = [...e.target.files];
-  e.target.value = '';
-  if (!files.length) return;
+// ---------------------------------------------------------------- import
+// "＋ Add" → Folder (every episode in it, JSON matched by name) or Files.
+const menu = $('add-menu');
+function setMenu(open) { menu.hidden = !open; $('import-btn').setAttribute('aria-expanded', String(open)); }
+$('import-btn').onclick = () => setMenu(menu.hidden);
+document.addEventListener('click', (e) => {
+  if (!menu.hidden && !e.target.closest('#add-menu, #import-btn')) setMenu(false);
+});
+menu.addEventListener('click', () => setTimeout(() => setMenu(false)));  // after the label opens the picker
+
+let orphans = [];      // audio files picked without their JSON
+let orphanPick = null; // the one "Pick JSON for X" was tapped for
+
+function takeFiles(input) {
+  const files = [...input.files];
+  input.value = '';
+  return files;
+}
+$('import').addEventListener('change', (e) => { const f = takeFiles(e.target); if (f.length) importFiles(f, false); });
+$('import-dir').addEventListener('change', (e) => { const f = takeFiles(e.target); if (f.length) importFiles(f, true); });
+
+async function readEpisode(file, msg) {
+  try { return validateEpisode(JSON.parse(await file.text())); }
+  catch (err) { msg.push(`${file.name}: ${err.message}`); return null; }
+}
+
+async function saveEpisode(data, audioFile, name, msg) {
+  try {
+    await db.putEpisode({ id: episodeId(data), title: data.title || episodeId(data), data, size: audioFile.size }, audioFile);
+    return true;
+  } catch (err) {
+    msg.push(`${name}: could not save (${err.message || err})`);
+    return false;
+  }
+}
+
+// A folder adds only episodes that are not in the library yet; picked files replace them.
+async function importFiles(files, folder) {
   const msg = [];
   const parsed = new Map();
-  for (const f of files.filter((f) => f.name.toLowerCase().endsWith('.json'))) {
-    try { parsed.set(f, validateEpisode(JSON.parse(await f.text()))); }
-    catch (err) { msg.push(`${f.name}: ${err.message}`); }
+  for (const f of files.filter((f) => ext(f.name) === 'json')) {
+    const data = await readEpisode(f, msg);
+    if (data) parsed.set(f, data);
   }
-  const valid = files.filter((f) => !f.name.toLowerCase().endsWith('.json') || parsed.has(f));
-  const { pairs, errors } = pairFiles(valid, (j) => parsed.get(j).audio);
+  const valid = files.filter((f) => ext(f.name) !== 'json' || parsed.has(f));
+  const { pairs, errors, orphans: lone } = pairFiles(valid, (j) => parsed.get(j).audio, { folder });
   msg.push(...errors);
-  let added = 0;
+  const have = folder ? new Set((await db.listEpisodes()).map((ep) => ep.id)) : new Set();
+  let added = 0, skipped = 0;
   for (const { json, audio: audioFile } of pairs) {
     const data = parsed.get(json);
-    try {
-      await db.putEpisode({ id: episodeId(data), title: data.title || episodeId(data), data, size: audioFile.size }, audioFile);
-      added++;
-    } catch (err) {
-      msg.push(`${json.name}: could not save (${err.message || err})`);
-    }
+    if (have.has(episodeId(data))) skipped++;
+    else if (await saveEpisode(data, audioFile, json.name, msg)) added++;
   }
-  if (added) msg.unshift(`Episodes added: ${added}`);
-  $('import-msg').textContent = msg.join('\n');
-  $('import-msg').hidden = !msg.length;
-  $('import-msg').classList.toggle('error', !added);
-  try { await navigator.storage?.persist?.(); } catch { /* best effort */ }
+  const head = [];
+  if (added) head.push(`Episodes added: ${added}`);
+  if (skipped) head.push(`Already in the library: ${skipped}`);
+  if (folder && !pairs.length && !msg.length) msg.push('No audio files in this folder');
+  showImportResult([...head, ...msg], added + skipped > 0, lone);
+}
+
+function showImportResult(lines, ok, lone) {
+  $('import-msg').textContent = lines.join('\n');
+  $('import-msg').hidden = !lines.length;
+  $('import-msg').classList.toggle('error', !ok);
+  orphans = lone;
+  $('orphans').innerHTML = lone.map((a, i) => `<button class="chip" data-o="${i}">Pick JSON for ${esc(a.name)}</button>`).join('');
+  $('orphans').hidden = !lone.length;
+  navigator.storage?.persist?.().catch(() => {});
   showLibrary();
+}
+
+$('orphans').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-o]');
+  if (!b) return;
+  orphanPick = orphans[+b.dataset.o];
+  $('pick-json').click();
+});
+$('pick-json').addEventListener('change', async (e) => {
+  const [file] = takeFiles(e.target);
+  const audioFile = orphanPick;
+  if (!file || !audioFile) return;
+  const msg = [];
+  const data = await readEpisode(file, msg);
+  if (data && await saveEpisode(data, audioFile, file.name, msg)) {
+    showImportResult(['Episodes added: 1', ...msg], true, orphans.filter((a) => a !== audioFile));
+  } else {
+    showImportResult(msg, false, orphans);
+  }
 });
 
 // ---------------------------------------------------------------- player
-let cur = null; // { ep, data, w2s, rows, current, objectUrl }
-let saveTimer = 0;
+let cur = null; // { ep, data, w2s, rows, current, objectUrl, next }
+let order = []; // playlist: episode ids in library order
+
+async function loadEpisode(id) {
+  const [ep, blob] = await Promise.all([db.getEpisode(id), db.getAudio(id)]);
+  return ep && blob ? { ep, blob } : null;
+}
 
 async function openEpisode(id) {
   if (cur && cur.ep.id === id) return;
-  closeEpisode();
-  const ep = await db.getEpisode(id);
-  const blob = ep && await db.getAudio(id);
-  if (!ep || !blob) { location.hash = ''; return; }
+  const loaded = await loadEpisode(id);
+  if (!loaded) { closeEpisode(); location.hash = ''; return; }
+  if (cur && cur.ep.id === id) return;
+  showEpisode(loaded, false);
+}
 
+// Synchronous on purpose: when an episode ends, the next one must start right
+// in the 'ended' handler, or iOS may not let it play with the screen locked.
+function showEpisode({ ep, blob }, autoplay) {
+  closeEpisode();
   const data = ep.data;
   cur = {
     ep, data,
@@ -136,12 +207,55 @@ async function openEpisode(id) {
   setRate(prefs.rate());
   $('seek').max = duration(data) || 1;
   $('dur').textContent = fmtTime(duration(data));
-  updateTime(prefs.pos(id));
+  updateTime(prefs.pos(ep.id));
   audio.src = cur.objectUrl;
   audio.load();
+  if (autoplay) play();
   window.scrollTo(0, 0);
   setupMediaSession(ep.title);
+  cur.next = null;
+  updateNav();
+  db.listEpisodes().then((eps) => {
+    order = sortEpisodes(eps).map((e) => e.id);
+    if (cur?.ep.id !== ep.id) return;
+    updateNav();
+    const id = neighbor(order, ep.id, 1);
+    if (id) loadEpisode(id).then((n) => { if (cur?.ep.id === ep.id) cur.next = n; });
+  });
 }
+
+function updateNav() {
+  $('prev').disabled = !cur || !neighbor(order, cur.ep.id, -1);
+  $('next').disabled = !cur || !neighbor(order, cur.ep.id, 1);
+}
+
+function switchTo(n, autoplay) {
+  showEpisode(n, autoplay);
+  history.replaceState(null, '', `#/ep/${encodeURIComponent(n.ep.id)}`);
+}
+
+// Previous / next episode; keeps playing if it was playing.
+async function go(d) {
+  if (!cur) return;
+  const id = neighbor(order, cur.ep.id, d);
+  if (!id) return;
+  const playing = !audio.paused;
+  const n = cur.next?.ep.id === id ? cur.next : await loadEpisode(id);
+  if (n) switchTo(n, playing);
+}
+$('prev').onclick = () => go(-1);
+$('next').onclick = () => go(1);
+
+// End of an episode: the next one in the list starts playing.
+audio.addEventListener('ended', () => {
+  if (!cur) return;
+  savePosition();
+  const id = neighbor(order, cur.ep.id, 1);
+  if (!id) return;
+  const from = cur.ep.id;
+  if (cur.next?.ep.id === id) switchTo(cur.next, true);
+  else loadEpisode(id).then((n) => { if (n && cur?.ep.id === from) switchTo(n, true); });
+});
 
 function closeEpisode() {
   if (!cur) return;
@@ -357,6 +471,8 @@ function setupMediaSession(title) {
       seekbackward: (d) => skip(-(d.seekOffset || 10)),
       seekforward: (d) => skip(d.seekOffset || 10),
       seekto: (d) => seekTo(d.seekTime),
+      previoustrack: () => go(-1),
+      nexttrack: () => go(1),
     };
     for (const [k, fn] of Object.entries(handlers)) {
       try { navigator.mediaSession.setActionHandler(k, fn); } catch { /* unsupported action */ }

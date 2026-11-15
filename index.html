@@ -19,15 +19,24 @@
 <section id="library" hidden>
   <header class="bar">
     <h1>Listen</h1>
-    <label class="chip primary" for="import" id="import-btn">＋ Add</label>
+    <button class="chip primary" id="import-btn" aria-haspopup="true" aria-expanded="false">＋ Add</button>
+    <div id="add-menu" class="menu" hidden>
+      <label for="import-dir"><b>Folder</b><span>every episode in it, JSON found by name</span></label>
+      <label for="import"><b>Files</b><span>pick the audio and its .json</span></label>
+    </div>
+    <input type="file" id="import-dir" webkitdirectory hidden>
     <input type="file" id="import" multiple accept=".json,.mp3,.m4a,.aac,.wav,.flac,.ogg,.opus,audio/*,application/json" hidden>
+    <input type="file" id="pick-json" accept=".json,application/json" hidden>
   </header>
   <div id="import-msg" class="msg" hidden></div>
+  <div id="orphans" hidden></div>
   <ul id="episodes"></ul>
   <div id="empty" class="empty" hidden>
     <p>Your library is empty.</p>
-    <p>Tap “＋ Add” and pick both files of an episode in Files:
-      <b>X.mp3</b> and <b>X.json</b> (made by <code>listen-gen</code>). You can add several episodes at once.</p>
+    <p>Tap “＋ Add” → <b>Folder</b> and pick the folder with your episodes in Files: audio
+      (<b>X.mp3</b> or <b>X.m4a</b>) and <b>X.json</b> made by <code>listen-gen</code>. Each audio
+      is matched with its JSON by name. Or choose <b>Files</b> and pick an audio together with its JSON.</p>
+    <p>Episodes play in order: when one ends, the next starts.</p>
     <p>Everything is stored on the phone and works without internet.</p>
   </div>
   <p id="storage" class="storage"></p>
@@ -37,6 +46,8 @@
   <header class="bar">
     <button class="icon" id="back" aria-label="Back">‹</button>
     <h1 id="ep-title"></h1>
+    <button class="icon nav" id="prev" aria-label="Previous episode">⏮</button>
+    <button class="icon nav" id="next" aria-label="Next episode">⏭</button>
     <button class="chip" id="tr-toggle">Translation</button>
     <button class="chip" id="speed">1×</button>
   </header>
