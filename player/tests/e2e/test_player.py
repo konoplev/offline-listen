@@ -521,3 +521,48 @@ def test_media_session_track_actions(two):
     page.wait_for_function("window.__h.previoustrack")
     page.evaluate("window.__h.previoustrack()")
     page.wait_for_function("document.getElementById('ep-title').textContent === 'Episode 1'")
+
+
+# ------------------------------------------------------------------ broken update
+
+def test_broken_app_cache_offers_reload_and_keeps_episodes(context, server):
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server)
+    page.wait_for_function("navigator.serviceWorker.controller !== null || (location.reload(), false)",
+                           timeout=10000, polling=1000)
+    import_files(page, EP_JSON, EP_MP3)
+    page.wait_for_selector(".ep")
+    assert page.locator("#boot-fail").is_hidden()
+    # a half-updated cache: new app.js next to an old lib.js without the exports it needs
+    page.evaluate("""async () => {
+        for (const k of await caches.keys()) {
+            const c = await caches.open(k);
+            await c.put('lib.js', new Response('export const old = 1;', {headers: {'content-type': 'text/javascript'}}));
+        }
+    }""")
+    page.reload()
+    page.wait_for_selector("#boot-fail:not([hidden])", timeout=8000)
+    assert page.locator("#library").is_hidden()
+    assert errors  # the module failed to load
+    page.click("#boot-reload")
+    page.wait_for_selector(".ep", timeout=10000)
+    assert page.locator(".ep").count() == 1  # episodes survive
+    assert page.locator("#boot-fail").is_hidden()
+
+
+def test_app_files_come_from_one_cached_set(context, server):
+    page = context.new_page()
+    page.goto(server)
+    page.wait_for_function("navigator.serviceWorker.controller !== null || (location.reload(), false)",
+                           timeout=10000, polling=1000)
+    names = page.evaluate("""async () => {
+        const c = await caches.open((await caches.keys())[0]);
+        return (await c.keys()).map((r) => new URL(r.url).pathname.split('/').pop());
+    }""")
+    assert sorted(names) == sorted(["", "index.html", "app.js", "lib.js", "db.js", "app.css",
+                                    "manifest.webmanifest", "icon-180.png", "icon-512.png"])
+    page.reload()  # served from the set: nothing is re-cached one file at a time
+    page.wait_for_selector("#library:not([hidden])")
+    assert page.evaluate("window.listenReady") is True

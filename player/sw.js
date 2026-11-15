@@ -1,13 +1,19 @@
-// Offline support: the app shell is cached on install. Requests are served
-// from the cache first and refreshed from the network in the background, so a
-// new version is picked up on the next launch. Bump VERSION when files change.
-const VERSION = 'v3';
+// Offline support: the app shell is cached on install, as one set, and served
+// only from that set. Files are never refreshed one by one: right after a
+// deploy the CDN can still return some old files, and a mix of old and new
+// modules leaves a blank page. A new set arrives only with a new sw.js (the
+// browser checks it on every launch, bypassing the HTTP cache), so the update
+// shows up on the next launch. Bump VERSION whenever player files change.
+const VERSION = 'v4';
 const CACHE = `offline-listen-${VERSION}`;
 const SHELL = ['./', 'index.html', 'app.js', 'lib.js', 'db.js', 'app.css', 'manifest.webmanifest',
   'icon-180.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's HTTP cache, which may hold older copies
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -22,14 +28,8 @@ self.addEventListener('fetch', (e) => {
   const key = req.mode === 'navigate' ? 'index.html' : req;
   e.respondWith(caches.open(CACHE).then(async (cache) => {
     const cached = await cache.match(key, { ignoreSearch: true });
-    const fresh = fetch(req).then((res) => {
-      if (res.ok) cache.put(key, res.clone());
-      return res;
-    }).catch(() => null);
-    if (cached) {
-      e.waitUntil(fresh);
-      return cached;
-    }
-    return (await fresh) || new Response('offline', { status: 503 });
+    if (cached) return cached;
+    try { return await fetch(req); }
+    catch { return new Response('offline', { status: 503 }); }
   }));
 });

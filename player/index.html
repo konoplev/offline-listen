@@ -85,6 +85,33 @@
 </section>
 
 <audio id="audio" preload="auto"></audio>
+<div id="boot-fail" class="msg error" hidden>
+  Listen could not start, probably because of an unfinished update.
+  Your episodes are safe. <button class="chip" id="boot-reload">Reload the app</button>
+</div>
+<script>
+// If app.js fails to start (e.g. a broken cache), offer to reload the app files.
+// Only the app's code cache is dropped; episodes in IndexedDB stay.
+(function () {
+  function show() {
+    if (window.listenReady) return;
+    document.getElementById('boot-fail').hidden = false;
+  }
+  window.addEventListener('error', show);
+  setTimeout(show, 5000);
+  document.getElementById('boot-reload').onclick = function () {
+    var steps = [];
+    if (navigator.serviceWorker) {
+      steps.push(navigator.serviceWorker.getRegistrations()
+        .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }));
+    }
+    if (window.caches) {
+      steps.push(caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }));
+    }
+    Promise.all(steps).catch(function () {}).then(function () { location.reload(); });
+  };
+})();
+</script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

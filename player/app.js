@@ -486,3 +486,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 
 route();
+window.listenReady = true;  // see the boot check in index.html
