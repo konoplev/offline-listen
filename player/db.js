@@ -27,8 +27,10 @@ function tx(stores, mode, fn) {
     let result;
     Promise.resolve(fn(t)).then((r) => { result = r; });
     t.oncomplete = () => resolve(result);
-    t.onerror = () => reject(t.error);
-    t.onabort = () => reject(t.error || new Error('transaction aborted'));
+    // error is null when storage is unavailable, e.g. Safari private browsing
+    const fail = () => reject(t.error || new Error('storage is not available (private browsing?)'));
+    t.onerror = fail;
+    t.onabort = fail;
   }));
 }
 

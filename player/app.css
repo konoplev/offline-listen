@@ -25,6 +25,18 @@ button, label.chip { font: inherit; cursor: pointer; }
 .chip.on, .chip.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .icon { border: 0; background: none; color: var(--accent); font-size: 32px; line-height: 1; padding: 0 8px 4px 0; }
 
+.icon.nav { font-size: 20px; padding: 0 4px; }
+.icon.nav:disabled { color: var(--muted); opacity: .4; }
+
+.menu { position: absolute; right: 16px; top: calc(100% + 4px); z-index: 3; background: var(--card);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 20px rgba(0, 0, 0, .15); overflow: hidden;
+  max-width: calc(100vw - 32px); }
+.menu label { display: block; padding: 10px 14px; cursor: pointer; font-size: 16px; }
+.menu label + label { border-top: 1px solid var(--line); }
+.menu label span { display: block; font-size: 13px; color: var(--muted); }
+.menu label:active { background: var(--active); }
+#orphans { margin: 0 16px 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+
 .msg { margin: 12px 16px; padding: 10px 12px; border-radius: 8px; background: var(--card);
   border: 1px solid var(--line); font-size: 14px; white-space: pre-line; }
 .msg.error { border-color: var(--error); color: var(--error); }
@@ -36,6 +48,8 @@ button, label.chip { font: inherit; cursor: pointer; }
 .ep-open { flex: 1; min-width: 0; border: 0; background: none; color: inherit; text-align: left; padding: 0; }
 .ep-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep-meta { font-size: 13px; color: var(--muted); }
+.ep.done .ep-title::before { content: "✓ "; color: var(--accent); }
+.ep.done .ep-title { color: var(--muted); }
 .progress { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
 .progress > div { height: 100%; background: var(--accent); }
 .ep-del { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 8px;

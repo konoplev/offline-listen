@@ -6,14 +6,15 @@ Steps, cached in <folder>/.listen-cache/ so a failed run resumes cheaply:
      optional (--fix): LLM fixes recognition errors -> X.fixed.json
   3. split cues into sentences and translate them:
      macOS built-in translator (default, free) or LLM (--translator llm)
-  4. write X.json for the player, plus plain SRTs for other players
+  4. write X.json for the player, plus plain SRTs for other players;
+     a VBR MP3 also gets an AAC copy X.m4a for exact seeking (see audio.py)
 """
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from . import apple, llm, srt
+from . import apple, audio as audio_mod, llm, srt
 from .sentences import split_sentences
 from .transcribe import group_words
 
@@ -38,8 +39,11 @@ class Options:
 
 
 def find_audio(folder: Path) -> list[Path]:
-    return sorted(p for p in folder.iterdir()
-                  if p.is_file() and p.suffix.lower() in AUDIO_EXT and not p.name.startswith("."))
+    """Audio files to process. X.m4a next to another X.* is our seekable copy, not an episode."""
+    files = [p for p in folder.iterdir()
+             if p.is_file() and p.suffix.lower() in AUDIO_EXT and not p.name.startswith(".")]
+    stems = {p.stem for p in files if p.suffix.lower() != ".m4a"}
+    return sorted(p for p in files if not (p.suffix.lower() == ".m4a" and p.stem in stems))
 
 
 def output_path(audio: Path) -> Path:
@@ -106,7 +110,14 @@ def process(audio: Path, opts: Options, call: Callable[[], llm.JsonCall],
     log(f"  translate ({opts.translator}): {len(sentences)} sentences")
 
     # 4. outputs
-    data = build_output(audio, opts, cues, sentences)
+    player_audio = audio_mod.seekable_path(audio)
+    if player_audio != audio:
+        if player_audio.exists() and not opts.force:
+            log(f"  audio: VBR mp3, using existing {player_audio.name}")
+        else:
+            audio_mod.to_m4a(audio, player_audio)
+            log(f"  audio: VBR mp3 -> {player_audio.name} (Safari cannot seek VBR mp3 exactly)")
+    data = build_output(player_audio, opts, cues, sentences)
     out = output_path(audio)
     srt.write(audio.with_suffix(".srt"), cues, "text")
     srt.write(audio.with_suffix(f".{opts.tgt}.srt"), sentences, "tr")

@@ -218,6 +218,12 @@ def test_find_audio_ignores_hidden_and_non_audio(tmp_path):
     assert [p.name for p in pipeline.find_audio(tmp_path)] == ["a.mp3", "b.M4A"]
 
 
+def test_find_audio_skips_our_m4a_copy_but_not_a_lone_m4a(tmp_path):
+    for n in ["a.mp3", "a.m4a", "b.m4a"]:
+        (tmp_path / n).write_bytes(b"")
+    assert [p.name for p in pipeline.find_audio(tmp_path)] == ["a.mp3", "b.m4a"]
+
+
 def test_empty_folder_and_missing_folder(tmp_path):
     assert cli.main([str(tmp_path)], call=FakeLLM(), transcribe_fn=FakeWhisper(), apple_fn=FakeApple()) == 1
     assert cli.main([str(tmp_path / "nope")], call=FakeLLM(), transcribe_fn=FakeWhisper(), apple_fn=FakeApple()) == 2

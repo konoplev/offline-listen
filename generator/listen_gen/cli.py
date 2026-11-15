@@ -4,6 +4,8 @@ For every audio file X.* in FOLDER writes
     X.json        cues + sentences + translations — load it into the player with X.mp3
     X.srt         transcript (short cues, 8 words / 5 s)
     X.<tgt>.srt   translation, one entry per sentence
+    X.m4a         only for a VBR X.mp3: an AAC copy, because Safari cannot seek VBR mp3
+                  exactly (subtitles would drift); load it into the player instead of X.mp3
 Translation uses the free built-in macOS translator by default (language packs:
 System Settings → General → Language & Region → Translation Languages);
 --translator llm uses an OpenAI-compatible model instead. --fix lets the LLM fix

@@ -69,7 +69,8 @@ To try it right away, download the sample episode,
 ## Add episodes
 
 1. On the Mac, run `listen-gen` on a folder of audio files (see below). It writes
-   `X.json` next to each `X.mp3`.
+   `X.json` next to each `X.mp3`. If an mp3 has a variable bitrate, it also writes
+   `X.m4a`: copy that one instead of `X.mp3` (see below).
 2. Copy both files to the iPhone. You can:
    - AirDrop them and choose **Save to Files**, or
    - put them in iCloud Drive, or
@@ -120,9 +121,16 @@ For every `X.mp3` in the folder (also m4a, aac, wav, flac, ogg and opus), it wri
 | `X.json` | everything the player needs: lines, sentences and translations |
 | `X.srt` | the transcript in short lines (8 words or 5 s); fixed by the LLM if you use `--fix` |
 | `X.ru.srt` | the translation, one entry per sentence |
+| `X.m4a` | only for a variable-bitrate (VBR) mp3: an AAC copy that `X.json` points to |
 | `.listen-cache/` | intermediate results, so a failed run resumes where it stopped |
 
 Files that already have `X.json` are skipped.
+
+Why `X.m4a`: Safari on iPhone can't seek precisely in a VBR mp3. After a seek, a tap on
+a sentence or resuming playback, the sound can be tens of seconds off from the
+subtitles. Constant-bitrate mp3 and AAC seek exactly, so a VBR mp3 is converted to AAC
+with ffmpeg. An old `X.json` made before this change still points to the mp3; run
+`listen-gen --force` once to get the `X.m4a`.
 
 | option | meaning |
 |---|---|

@@ -1,9 +1,10 @@
 """E2E fixtures: serve player/ over HTTP and drive the installed Google Chrome
 (channel="chrome" — no Playwright browser download) with an iPhone-sized,
-touch-enabled viewport."""
+touch-enabled viewport. LISTEN_BROWSER=webkit runs the same tests in WebKit."""
 import functools
 import http.server
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -32,19 +33,35 @@ def server():
     httpd.shutdown()
 
 
+WEBKIT = os.environ.get("LISTEN_BROWSER") == "webkit"  # Safari's engine; needs `playwright install webkit`
+DEVICE = dict(viewport={"width": 390, "height": 844}, device_scale_factor=2, has_touch=True, locale="en-US")
+
+
 @pytest.fixture(scope="session")
-def browser():
+def pw():
     with sync_playwright() as p:
-        b = p.chromium.launch(channel="chrome", headless=True,
-                              args=["--autoplay-policy=no-user-gesture-required", "--mute-audio"])
-        yield b
-        b.close()
+        yield p
+
+
+@pytest.fixture(scope="session")
+def browser(pw):
+    if WEBKIT:
+        yield None
+        return
+    b = pw.chromium.launch(channel="chrome", headless=True,
+                           args=["--autoplay-policy=no-user-gesture-required", "--mute-audio"])
+    yield b
+    b.close()
 
 
 @pytest.fixture
-def context(browser):
-    ctx = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2,
-                              is_mobile=True, has_touch=True, locale="en-US")
+def context(pw, browser, tmp_path_factory):
+    # WebKit's ephemeral contexts can't store Blobs in IndexedDB (like Safari's
+    # private mode), so WebKit gets a fresh persistent profile per test.
+    if WEBKIT:
+        ctx = pw.webkit.launch_persistent_context(str(tmp_path_factory.mktemp("profile")), headless=True, **DEVICE)
+    else:
+        ctx = browser.new_context(is_mobile=True, **DEVICE)
     yield ctx
     ctx.close()
 
@@ -90,3 +107,18 @@ def is_paused(page) -> bool:
 def set_time(page, t: float):
     page.evaluate(f"(() => {{ const a = document.getElementById('audio'); a.pause(); a.currentTime = {t}; }})()")
     page.wait_for_function(f"Math.abs(document.getElementById('audio').currentTime - {t}) < 0.05")
+
+
+def make_episode(folder: Path, title: str, ext: str = "mp3") -> tuple[Path, Path]:
+    """A copy of the fixture episode named `title` (audio + json) in folder."""
+    folder.mkdir(parents=True, exist_ok=True)
+    data = json.loads(EP_JSON.read_text(encoding="utf-8"))
+    data.update(title=title, audio=f"{title}.{ext}")
+    j, a = folder / f"{title}.json", folder / f"{title}.{ext}"
+    j.write_text(json.dumps(data), encoding="utf-8")
+    a.write_bytes(EP_MP3.read_bytes())
+    return j, a
+
+
+def import_folder(page, folder: Path):
+    page.set_input_files("#import-dir", str(folder))
